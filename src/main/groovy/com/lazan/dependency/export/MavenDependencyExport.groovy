@@ -23,10 +23,7 @@ import org.apache.maven.model.resolution.ModelResolver
 class MavenDependencyExport extends DefaultTask {
 	public Collection<Configuration> configurations = new LinkedHashSet<>()
 	public Map<String, Object> systemProperties = System.getProperties()
-	boolean exportSources
-	boolean exportJavadoc
-	boolean filterUnresolvable
-	
+
 	@InputFiles
 	FileCollection getInputFiles() {
 		return project.files(prepareConfigurations())
@@ -49,7 +46,7 @@ class MavenDependencyExport extends DefaultTask {
 		for (Configuration conf : configs)
 			configuration(conf)
 	}
-	
+
 	void configuration(String name) {
 		Configuration config = project.configurations.getByName(name)
 		if (config.canBeResolved) {
@@ -69,6 +66,7 @@ class MavenDependencyExport extends DefaultTask {
 
 	@TaskAction
 	void build() {
+		MavenDependencyExportExtension ext = getProject().getExtensions().findByType(MavenDependencyExportExtension)
 		ModelResolveListener resolveListener = { String groupId, String artifactId, String version, File pomFile ->
 			copyAssociatedPom(groupId, artifactId, version, pomFile)
 		}
@@ -77,9 +75,9 @@ class MavenDependencyExport extends DefaultTask {
 			logger.info "Exporting ${config.name}..."
 			copyJars(config)
 			copyPoms(config, modelResolver)
-			if (exportSources)
+			if (ext.exportSources)
 				copyAdditionalArtifacts(config, modelResolver, SourcesArtifact)
-			if (exportJavadoc)
+			if (ext.exportJavadoc)
 				copyAdditionalArtifacts(config, modelResolver, JavadocArtifact)
 		}
 		Set<String> exportedPaths = new TreeSet()
@@ -105,9 +103,9 @@ class MavenDependencyExport extends DefaultTask {
 			}
 		}
 	}
-	
+
 	protected void copyAdditionalArtifacts(Configuration config, ModelResolver modelResolver, Class<? extends Artifact> artifactType) {
-	
+
 		List<ComponentIdentifier> componentIds = config.incoming.resolutionResult.allDependencies.collect { it.selected.id }
 
 		ArtifactResolutionResult result = project.dependencies.createArtifactResolutionQuery()
@@ -121,7 +119,7 @@ class MavenDependencyExport extends DefaultTask {
 				File moduleDir = new File(exportDir, getPath(componentId.group, componentId.module, componentId.version))
 				project.mkdir(moduleDir)
 				Set<ArtifactResult> artifacts = component.getArtifacts(artifactType)
-				artifacts.each { 
+				artifacts.each {
 					ArtifactResult artifactResult ->
 						File file = artifactResult.file
 						project.copy {
@@ -135,6 +133,7 @@ class MavenDependencyExport extends DefaultTask {
 	}
 
 	protected void copyPoms(Configuration config, ModelResolver modelResolver) {
+		MavenDependencyExportExtension ext = getProject().getExtensions().findByType(MavenDependencyExportExtension)
 		List<ComponentIdentifier> componentIds = config.incoming.resolutionResult.allDependencies.collect { it.selected.id }
 
 		ArtifactResolutionResult result = project.dependencies.createArtifactResolutionQuery()
@@ -155,12 +154,13 @@ class MavenDependencyExport extends DefaultTask {
 
 					// only try unresolvable artifacts when filterUnresolvable is set to false
 					boolean isResolvableArtifact = !(artifactResult instanceof UnresolvedArtifactResult);
-					if (isResolvableArtifact || !filterUnresolvable) {
+					if (isResolvableArtifact || !ext.filterUnresolvable) {
 						File pomFile = artifactResult.file
 						project.copy {
 							from pomFile
 							into moduleDir
 						}
+
 						// force the parent POMs and BOMs to be downloaded and copied
 						try {
 							ModelBuildingRequest req = new DefaultModelBuildingRequest()
@@ -168,7 +168,7 @@ class MavenDependencyExport extends DefaultTask {
 							req.setPomFile(pomFile)
 							req.getSystemProperties().putAll(systemProperties)
 							req.setValidationLevel(ModelBuildingRequest.VALIDATION_LEVEL_MINIMAL)
-									
+
 							// execute the model building request
 							builder.build(req).getEffectiveModel()
 						} catch (Exception e) {
